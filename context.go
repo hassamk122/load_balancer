@@ -2,8 +2,10 @@ package main
 
 import "net/http"
 
+type ContextKey int
+
 const (
-	Attempts int = iota
+	Attempts ContextKey = iota
 	Retry
 )
 

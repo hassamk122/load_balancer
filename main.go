@@ -90,10 +90,12 @@ func main() {
 	backendsUrls := []string{
 		"http://localhost:6969",
 		"http://localhost:4200",
-		"http://localhost:9000",
+		"http://localhost:8989",
 	}
 
 	createBackends(backendsUrls)
+
+	serverPool.HealthCheck()
 
 	go healthCheck()
 
