@@ -37,6 +37,8 @@ func loadBalancer(res http.ResponseWriter, req *http.Request) {
 	http.Error(res, "Service not available", http.StatusServiceUnavailable)
 }
 
+// runs every 20 seconds
+// checks for backends health
 func healthCheck() {
 	ticker := time.NewTicker(time.Second * 20)
 	defer ticker.Stop()
@@ -48,6 +50,12 @@ func healthCheck() {
 	}
 }
 
+// iterates over provided urls and creates reverse proxy
+// for each setups a reverse proxy
+// creates a backend struct to store its info related to its status and proxy
+// reverse proxy error handler retries failed request
+// marks backend dead if max retries (3) reached
+// if no error adds backend to server pool
 func createBackends(backendsUrls []string) {
 	for _, rawUrl := range backendsUrls {
 		u, err := url.Parse(rawUrl)

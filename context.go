@@ -9,6 +9,8 @@ const (
 	Retry
 )
 
+// both functions allows us to extract attempts
+// and retries from req context
 func GetAttemptsFromContext(req *http.Request) int {
 	attempts, ok := req.Context().Value(Attempts).(int)
 	if ok {

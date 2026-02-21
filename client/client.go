@@ -7,6 +7,11 @@ import (
 	"sync"
 )
 
+// this is client is just to send many concurrent reqs
+// to test if load balancer correctly handles them
+// it uses 20 wait groups with 20 go routines running
+// wait() is like java thread join func which allows main thread
+// to end at last
 func main() {
 	concurrentReqs := 20
 	url := "http://localhost:8080"
