@@ -1,6 +1,10 @@
 package main
 
-import "sync/atomic"
+import (
+	"log"
+	"net/url"
+	"sync/atomic"
+)
 
 type ServerPool struct {
 	backends []*Backend
@@ -29,4 +33,31 @@ func (s *ServerPool) GetNextPeer() *Backend {
 		}
 	}
 	return nil
+}
+
+// iterates over backends
+// checks if it is alive
+// marks status
+func (s *ServerPool) HealthCheck() {
+	for _, b := range s.backends {
+		status := "up"
+		alive := isBackendAlive(b.URL)
+		b.SetAlive(alive)
+		if !alive {
+			status = "down"
+		}
+		log.Printf("%s [%s]\n", b.URL, status)
+	}
+}
+
+// iterate over backends
+// if url mactches any backend in server pool
+// mark it as alive
+func (s *ServerPool) MarkBackendStatus(backendUrl *url.URL, alive bool) {
+	for _, b := range s.backends {
+		if b.URL.String() == backendUrl.String() {
+			b.SetAlive(alive)
+			break
+		}
+	}
 }

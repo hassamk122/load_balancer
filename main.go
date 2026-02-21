@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"time"
 )
 
@@ -15,7 +13,11 @@ const (
 	port = 8080
 )
 
+var serverPool = &ServerPool{}
+
 // It will only fail if no backends are available
+// if a req attempts exceeds more than 3 attempts it shows error for that backend
+// other wise it pools to next available peer(backend)
 func loadBalancer(res http.ResponseWriter, req *http.Request) {
 
 	attempts := GetAttemptsFromContext(req)
@@ -25,9 +27,9 @@ func loadBalancer(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	serverPool := ServerPool{}
 	peer := serverPool.GetNextPeer()
 	if peer != nil {
+		log.Printf("Request from %s routed to backend %s \n", req.RemoteAddr, peer.URL)
 		peer.ReverseProxy.ServeHTTP(res, req)
 		return
 	}
@@ -35,40 +37,72 @@ func loadBalancer(res http.ResponseWriter, req *http.Request) {
 	http.Error(res, "Service not available", http.StatusServiceUnavailable)
 }
 
-func main() {
-	u, err := url.Parse("http://localhost:8080")
-	if err != nil {
-		os.Exit(1)
+func healthCheck() {
+	ticker := time.NewTicker(time.Second * 20)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		log.Printf("Starting health check ...")
+		serverPool.HealthCheck()
+		log.Printf("Health check complete.")
 	}
+}
 
-	reverseProxy := httputil.NewSingleHostReverseProxy(u)
-
-	reverseProxy.ErrorHandler = func(res http.ResponseWriter, req *http.Request, err error) {
-		log.Printf("[%s] %s\n", u.Host, err.Error())
-		retries := GetRetryFromContext(req)
-		if retries < 3 {
-			select {
-			case <-time.After(10 * time.Millisecond):
-				ctx := context.WithValue(req.Context(), Retry, retries+1)
-				reverseProxy.ServeHTTP(res, req.WithContext(ctx))
-			}
-			return
+func createBackends(backendsUrls []string) {
+	for _, rawUrl := range backendsUrls {
+		u, err := url.Parse(rawUrl)
+		if err != nil {
+			log.Fatal(err)
 		}
 
-		// after 3 attempts mark it as down
-		serverPool := ServerPool{}
-		serverPool.MarkBackendStatus(u, false)
+		func(u *url.URL) {
+			reverseProxy := httputil.NewSingleHostReverseProxy(u)
 
-		// if same req routing  for few attempts with diff backend, increase attempts
-		attempts := GetAttemptsFromContext(req)
-		log.Printf("%s(%s) Attempting retry %d\n", req.RemoteAddr, req.URL.Path, attempts)
-		ctx := context.WithValue(req.Context(), Attempts, attempts+1)
-		loadBalancer(res, req.WithContext(ctx))
+			backend := &Backend{
+				URL:          u,
+				Alive:        true,
+				ReverseProxy: reverseProxy,
+			}
+
+			reverseProxy.ErrorHandler = func(res http.ResponseWriter, req *http.Request, err error) {
+				log.Printf("[%s] %s\n", u.Host, err.Error())
+				retries := GetRetryFromContext(req)
+				if retries < 3 {
+					ctx := context.WithValue(req.Context(), Retry, retries+1)
+					reverseProxy.ServeHTTP(res, req.WithContext(ctx))
+					return
+				}
+
+				serverPool.MarkBackendStatus(u, false)
+
+				attempts := GetAttemptsFromContext(req)
+				ctx := context.WithValue(req.Context(), Attempts, attempts+1)
+				loadBalancer(res, req.WithContext(ctx))
+			}
+
+			serverPool.backends = append(serverPool.backends, backend)
+		}(u)
+
 	}
+}
+
+func main() {
+	backendsUrls := []string{
+		"http://localhost:6969",
+		"http://localhost:4200",
+		"http://localhost:9000",
+	}
+
+	createBackends(backendsUrls)
+
+	go healthCheck()
+
 	server := http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
+		Addr:    ":8080",
 		Handler: http.HandlerFunc(loadBalancer),
 	}
-	http.Handle("/", reverseProxy)
-	http.ListenAndServe(":8080", nil)
+
+	log.Println("started at port :8080")
+	log.Fatal(server.ListenAndServe())
+
 }
